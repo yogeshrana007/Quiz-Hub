@@ -152,10 +152,10 @@ export default function AttemptResult() {
                                         <p className="text-green-700"></p>
                                     ) : (
                                         <p className="text-red-700">
-                                            <p className="text-gray-800">
+                                            <span className="text-gray-800">
                                                 Correct Option:{" "}
                                                 <strong>{correctId}</strong>
-                                            </p>
+                                            </span>
                                         </p>
                                     )
                                 ) : (

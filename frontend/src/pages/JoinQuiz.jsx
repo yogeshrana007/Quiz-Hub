@@ -24,6 +24,12 @@ const JoinQuiz = () => {
             const mode = response.quiz.mode; // "exam" or "live"
 
             if (mode === "live") {
+                navigate(`/quiz/${quizId}/live`);
+            } else {
+                navigate(`/quiz/${quizId}/attempt`);
+            }
+
+            if (mode === "live") {
                 navigate(`/quiz/${quizId}/live`); // redirect to live mode component
             } else {
                 navigate(`/quiz/${quizId}/attempt`); // exam mode as before

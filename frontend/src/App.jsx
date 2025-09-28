@@ -129,7 +129,7 @@ const AppContent = () => {
                         }
                     />
                     <Route
-                        path="/quiz/:id/live"
+                        path="/quiz/:quizId/live"
                         element={
                             <ProtectedRoute>
                                 <LiveQuizStudent />

@@ -1,6 +1,6 @@
 export default function setupAuthInterceptors(
     api,
-    { setAccessToken, onRefreshFail }
+    { getAccessToken, setAccessToken, onRefreshFail } = {}
 ) {
     let isRefreshing = false;
     let failedQueue = [];
@@ -12,10 +12,11 @@ export default function setupAuthInterceptors(
         failedQueue = [];
     };
 
-    // request - attach latest token from localStorage (simple & reliable)
+    // request - attach latest token from getAccessToken or localStorage
     api.interceptors.request.use(
         (config) => {
-            const tok = localStorage.getItem("accessToken");
+            const tok =
+                getAccessToken?.() || localStorage.getItem("accessToken");
             if (tok) config.headers.Authorization = `Bearer ${tok}`;
             return config;
         },
@@ -33,10 +34,8 @@ export default function setupAuthInterceptors(
             if (!originalRequest || originalRequest._retry)
                 return Promise.reject(error);
 
-            // detect token expired (server sends "Token expired" message)
             if (status === 401 && /token/i.test(serverErr)) {
                 if (isRefreshing) {
-                    // queue the request
                     return new Promise((resolve, reject) => {
                         failedQueue.push({ resolve, reject });
                     })
@@ -52,27 +51,21 @@ export default function setupAuthInterceptors(
 
                 return new Promise(async (resolve, reject) => {
                     try {
-                        // make refresh call using the same axios instance (api) so baseURL + withCredentials used
                         const r = await api.get("/api/auth/refresh", {
                             withCredentials: true,
                         });
                         const newToken = r.data.accessToken;
 
-                        // update storage & app state
                         localStorage.setItem("accessToken", newToken);
-                        setAccessToken(newToken);
+                        setAccessToken?.(newToken);
 
                         processQueue(null, newToken);
 
-                        // retry original
                         originalRequest.headers.Authorization = `Bearer ${newToken}`;
                         resolve(api(originalRequest));
                     } catch (err) {
                         processQueue(err, null);
-                        // refresh failed -> call app logout handler
-                        try {
-                            onRefreshFail && onRefreshFail();
-                        } catch (e) {}
+                        onRefreshFail?.();
                         reject(err);
                     } finally {
                         isRefreshing = false;

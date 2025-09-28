@@ -48,3 +48,5 @@ jest-results/
 # Misc
 *.swp
 *.bak
+
+frontend/.vite/

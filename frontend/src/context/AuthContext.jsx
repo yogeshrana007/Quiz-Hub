@@ -1,6 +1,7 @@
 // AuthContext.jsx
 import axios from "axios";
 import { createContext } from "react";
+import setupAuthInterceptors from "../api/authInterceptors.js";
 
 export const AuthDataContext = createContext();
 
@@ -11,6 +12,8 @@ const api = axios.create({
     baseURL: serverUrl,
     withCredentials: true,
 });
+
+setupAuthInterceptors(api);
 
 const value = { serverUrl, api };
 
