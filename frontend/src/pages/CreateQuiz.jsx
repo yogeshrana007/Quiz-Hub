@@ -15,7 +15,7 @@ const CreateQuiz = () => {
     const [quiz, setQuiz] = useState({
         title: "",
         description: "",
-        mode: "live",
+        mode: "exam",
         timer: "",
         shuffleQuestions: false,
         questions: [],
@@ -40,7 +40,14 @@ const CreateQuiz = () => {
         const { name, value, type, checked } = e.target;
         setQuiz((prev) => ({
             ...prev,
-            [name]: type === "checkbox" ? checked : value,
+            [name]:
+                type === "checkbox"
+                    ? checked
+                    : type === "number"
+                    ? value === ""
+                        ? ""
+                        : parseInt(value)
+                    : value,
         }));
     };
 
@@ -53,7 +60,15 @@ const CreateQuiz = () => {
                 options: { ...prev.options, [option]: value },
             }));
         } else {
-            setNewQuestion((prev) => ({ ...prev, [name]: value }));
+            setNewQuestion((prev) => ({
+                ...prev,
+                [name]:
+                    name === "marks" || name === "timer"
+                        ? value === ""
+                            ? ""
+                            : parseInt(value)
+                        : value,
+            }));
         }
     };
 
@@ -121,6 +136,9 @@ const CreateQuiz = () => {
             errors.description = "Quiz description is required";
         if (quiz.questions.length === 0)
             errors.questions = "At least one question is required";
+        if (quiz.mode === "exam" && (!quiz.timer || quiz.timer < 1)) {
+            errors.timer = "Quiz timer is required in Exam mode";
+        }
         return errors;
     };
 
@@ -145,7 +163,7 @@ const CreateQuiz = () => {
                 })),
                 difficulty: "easy",
                 marks: q.marks || 1,
-                timer: q.timer || null,
+                timer: q.timer ? q.timer * 60 : null,
             }));
 
             // 2 Create all questions in bulk
@@ -171,7 +189,7 @@ const CreateQuiz = () => {
                 questionIds, // send IDs, not embedded questions
                 mode: quiz.mode,
                 settings: {
-                    timerPerQuizSec: quiz.timer ? parseInt(quiz.timer) : null,
+                    timerPerQuizSec: quiz.timer ? quiz.timer * 60 : null,
                     shuffleQuestions: quiz.shuffleQuestions,
                     showPercentInLive: true,
                     allowReviewInExam: true,
@@ -194,7 +212,7 @@ const CreateQuiz = () => {
     };
 
     return (
-        <div className="max-w-4xl mx-auto space-y-8">
+        <div className="max-w-4xl mx-auto mt-[-90px] space-y-8">
             {/* Header */}
             <div className="bg-gradient-primary text-white rounded-lg p-6">
                 <h1 className="text-3xl font-bold mb-2">Create New Quiz</h1>
@@ -220,8 +238,13 @@ const CreateQuiz = () => {
                             name="title"
                             value={quiz.title}
                             onChange={handleQuizChange}
+                            disabled={!!createdQuiz}
                             className={`w-full p-3 border rounded-lg bg-background text-foreground 
-                ${errors.title ? "border-destructive" : "border-border"}`}
+                ${errors.title ? "border-destructive" : "border-border"} ${
+                                createdQuiz
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : ""
+                            }`}
                             placeholder="Enter quiz title"
                         />
                         {errors.title && (
@@ -242,7 +265,9 @@ const CreateQuiz = () => {
                             onChange={handleQuizChange}
                             rows={3}
                             className={`w-full p-3 border rounded-lg bg-background text-foreground 
-                ${errors.description ? "border-destructive" : "border-border"}`}
+                ${
+                    errors.description ? "border-destructive" : "border-border"
+                } ${createdQuiz ? "opacity-50 cursor-not-allowed" : ""}`}
                             placeholder="Describe your quiz"
                         />
                         {errors.description && (
@@ -261,38 +286,62 @@ const CreateQuiz = () => {
                             name="mode"
                             value={quiz.mode}
                             onChange={handleQuizChange}
-                            className="w-full p-3 border border-border rounded-lg bg-background text-foreground"
+                            disabled={createdQuiz}
+                            className={`w-full p-3 border border-border rounded-lg bg-background text-foreground ${
+                                createdQuiz
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : ""
+                            }`}
                         >
-                            <option value="live">Live (Interactive)</option>
                             <option value="exam">Exam (Timed)</option>
+                            <option value="live">Live (Interactive)</option>
                         </select>
                     </div>
 
                     {/* Timer */}
-                    <div>
-                        <label className="block text-sm font-medium text-foreground mb-2">
-                            Quiz Timer (in minutes) (optional)
-                        </label>
-                        <input
-                            type="number"
-                            name="timer"
-                            value={quiz.timer}
-                            onChange={handleQuizChange}
-                            className="w-full p-3 border border-border rounded-lg bg-background text-foreground"
-                            placeholder="Optional"
-                            min="1"
-                        />
-                    </div>
+                    {quiz.mode === "exam" && (
+                        <div>
+                            <label className="block text-sm font-medium text-foreground mb-2">
+                                Quiz Timer (in minutes) *
+                            </label>
+                            <input
+                                type="number"
+                                name="timer"
+                                value={quiz.timer}
+                                onChange={handleQuizChange}
+                                className={`w-full p-3 border border-border rounded-lg bg-background text-foreground ${
+                                    createdQuiz
+                                        ? "opacity-50 cursor-not-allowed"
+                                        : ""
+                                }`}
+                                placeholder="Enter total quiz time"
+                                min="1"
+                                disabled={!!createdQuiz} // disable after creation
+                            />
+                            {errors.timer && (
+                                <p className="mt-1 text-sm text-destructive">
+                                    {errors.timer}
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     {/* Shuffle Questions */}
-                    <div className="md:col-span-2">
-                        <label className="flex items-center space-x-3">
+                    <div className={`md:col-span-2 `}>
+                        <label
+                            className={`flex items-center space-x-3 ${
+                                createdQuiz
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : ""
+                            }`}
+                        >
                             <input
                                 type="checkbox"
                                 name="shuffleQuestions"
                                 checked={quiz.shuffleQuestions}
                                 onChange={handleQuizChange}
-                                className="h-4 w-4 text-primary border-border rounded focus:ring-primary"
+                                disabled={!!createdQuiz}
+                                className={`h-4 w-4 text-primary border-border rounded focus:ring-primary `}
                             />
                             <span className="text-sm font-medium text-foreground">
                                 Shuffle questions for each student
@@ -328,8 +377,8 @@ const CreateQuiz = () => {
                             key={index}
                             question={question}
                             questionIndex={index}
-                            onEdit={editQuestion}
-                            onDelete={deleteQuestion}
+                            onEdit={createdQuiz ? null : editQuestion}
+                            onDelete={createdQuiz ? null : deleteQuestion}
                             isReview={false}
                         />
                     ))}
@@ -378,6 +427,7 @@ const CreateQuiz = () => {
                                             name={`option_${option}`}
                                             value={newQuestion.options[option]}
                                             onChange={handleQuestionChange}
+                                            disabled={!!createdQuiz}
                                             className={`w-full p-3 rounded-lg bg-background text-foreground border ${
                                                 errors[`option_${option}`]
                                                     ? "border-red-500"
@@ -422,6 +472,7 @@ const CreateQuiz = () => {
                                         name="marks"
                                         value={newQuestion.marks}
                                         onChange={handleQuestionChange}
+                                        disabled={!!createdQuiz}
                                         className={`w-full p-3 rounded-lg bg-background text-foreground border ${
                                             errors.marks
                                                 ? "border-red-500"
@@ -436,20 +487,23 @@ const CreateQuiz = () => {
                                     )}
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-foreground mb-2">
-                                        Time Limit (seconds) (optional)
-                                    </label>
-                                    <input
-                                        type="number"
-                                        name="timer"
-                                        value={newQuestion.timer}
-                                        onChange={handleQuestionChange}
-                                        className="w-full p-3 border rounded-lg bg-background text-foreground border-gray-300"
-                                        placeholder="Optional"
-                                        min="10"
-                                    />
-                                </div>
+                                {/* {quiz.mode === "exam" && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-foreground mb-2">
+                                            Time Limit (minutes) (optional)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            name="timer"
+                                            value={newQuestion.timer}
+                                            onChange={handleQuestionChange}
+                                            className="w-full p-3 border rounded-lg bg-background text-foreground border-gray-300"
+                                            placeholder="Optional"
+                                            min="1"
+                                            disabled={!!createdQuiz} // disable after creation
+                                        />
+                                    </div>
+                                )} */}
                             </div>
 
                             {/* Buttons */}
@@ -475,46 +529,63 @@ const CreateQuiz = () => {
                     </div>
                 )}
             </div>
-
-            <button
-                onClick={() => setShowAddQuestion(true)}
-                className="border-gray-400 border-2 flex items-center space-x-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary-light transition-colors duration-200"
-            >
-                <FiPlus className="h-4 w-4" />
-                <span>Add New Question</span>
-            </button>
+            {!createdQuiz && (
+                <button
+                    onClick={() => setShowAddQuestion(true)}
+                    className="border-gray-400 border-2 flex items-center space-x-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary-light transition-colors duration-200"
+                >
+                    <FiPlus className="h-4 w-4" />
+                    <span>Add New Question</span>
+                </button>
+            )}
             {/* Submit Button */}
             <div className="flex md:flex-row justify-between items-center md:items-center space-y-4 md:space-y-0">
-                <button
-                    onClick={() => navigate("/dashboard")}
-                    className="px-6 py-3 border border-border text-foreground rounded-lg hover:bg-muted transition-colors duration-200"
-                >
-                    Cancel
-                </button>
-                <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-                    <button
-                        onClick={handleSubmit}
-                        disabled={loading || quiz.questions.length === 0}
-                        className="flex items-center space-x-2 bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:bg-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                    >
-                        {loading ? (
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                        ) : (
-                            <FiSave className="h-5 w-5" />
-                        )}
-                        <span>{loading ? "Creating..." : "Create Quiz"}</span>
-                    </button>
+                {!createdQuiz && (
+                    <div className="w-full flex justify-between">
+                        <button
+                            onClick={() => navigate("/dashboard")}
+                            className="px-6 py-3 border border-border text-foreground rounded-lg hover:bg-muted transition-colors duration-200"
+                        >
+                            Cancel
+                        </button>
 
-                    {/* Show Join Code after creation */}
-                    {createdQuiz && (
-                        <div className="p-4 bg-green-100 rounded-lg text-green-800 font-medium">
-                            Join Code:{" "}
-                            <span className="font-bold">
-                                {createdQuiz.joinCode}
-                            </span>
+                        <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+                            <button
+                                onClick={handleSubmit}
+                                disabled={
+                                    loading || quiz.questions.length === 0
+                                }
+                                className="flex items-center space-x-2 bg-primary text-primary-foreground px-6 py-3 rounded-lg hover:bg-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+                            >
+                                {loading ? (
+                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                                ) : (
+                                    <FiSave className="h-5 w-5" />
+                                )}
+                                <span>
+                                    {loading ? "Creating..." : "Create Quiz"}
+                                </span>
+                            </button>
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
+                {/* Show Join Code after creation */}
+                {createdQuiz && (
+                    <div className="p-4 bg-green-100 rounded-lg text-green-800 font-medium">
+                        Join Code:{" "}
+                        <span className="font-bold">
+                            {createdQuiz.joinCode}
+                        </span>
+                    </div>
+                )}
+                {createdQuiz && (
+                    <button
+                        className="px-6 py-3 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors duration-200"
+                        onClick={() => navigate("/myquizzes")}
+                    >
+                        Back to My Quizzes
+                    </button>
+                )}
             </div>
         </div>
     );

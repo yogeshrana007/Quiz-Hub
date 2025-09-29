@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
-    FiAlertCircle,
-    FiCheck,
-    FiChevronLeft,
     FiChevronRight,
+    FiChevronsLeft,
+    FiChevronsRight,
     FiClock,
+    FiGrid,
+    FiX,
 } from "react-icons/fi";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAttemptsAPI } from "../api/attempts.js";
@@ -13,97 +14,50 @@ import { useQuizzesAPI } from "../api/quizzes.js";
 import QuestionCard from "../components/QuestionCard.jsx";
 
 const QuizAttempt = () => {
-    useEffect(() => {
-        const interval = setInterval(async () => {
-            try {
-                await api.get("/api/auth/refresh", { withCredentials: true });
-            } catch (err) {
-                console.log("Silent refresh failed", err);
-            }
-        }, 5 * 60 * 1000); // every 5 minutes
-        return () => clearInterval(interval);
-    }, []);
-
     const { id } = useParams();
     const navigate = useNavigate();
 
-    // API hooks
+    // APIs
     const { getQuizById } = useQuizzesAPI();
     const { submitAttempt } = useAttemptsAPI();
 
+    // State
     const [quiz, setQuiz] = useState(null);
     const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
     const [answers, setAnswers] = useState({});
+    const [marks, setMarks] = useState({});
+    const [visited, setVisited] = useState({});
     const [timeLeft, setTimeLeft] = useState(null);
-    const [questionTimeLeft, setQuestionTimeLeft] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [submitting, setSubmitting] = useState(false);
-    const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+    const [draftAnswers, setDraftAnswers] = useState({});
 
+    // Sidebar state: mobile drawer and desktop collapse
+    const [isDrawerOpen, setIsDrawerOpen] = useState(false); // mobile/tablet overlay drawer
+    const [isSideOpen, setIsSideOpen] = useState(true); // md+ inline sidebar collapse
+
+    const drawerButtonRef = useRef(null);
+    const drawerPanelRef = useRef(null);
+
+    // Fetch quiz
     useEffect(() => {
         fetchQuiz();
     }, [id]);
 
-    useEffect(() => {
-        if (timeLeft !== null && timeLeft > 0) {
-            const timer = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
-            return () => clearTimeout(timer);
-        } else if (timeLeft === 0) {
-            handleAutoSubmit();
-        }
-    }, [timeLeft]);
-
-    useEffect(() => {
-        if (questionTimeLeft !== null && questionTimeLeft > 0) {
-            const timer = setTimeout(
-                () => setQuestionTimeLeft((t) => t - 1),
-                1000
-            );
-            return () => clearTimeout(timer);
-        } else if (questionTimeLeft === 0) {
-            handleNextQuestion();
-        }
-    }, [questionTimeLeft]);
-
-    useEffect(() => {
-        const currentQuestion = quiz?.questions[currentQuestionIndex];
-        if (currentQuestion?.timeLimitSec) {
-            setQuestionTimeLeft(currentQuestion.timeLimitSec);
-        } else {
-            setQuestionTimeLeft(null);
-        }
-    }, [currentQuestionIndex, quiz]);
-
     const fetchQuiz = async () => {
         try {
             setLoading(true);
-            const response = await getQuizById(id);
-
-            // normalize questions to match QuestionCard
-            const normalizedQuestions = response.questions.map((q) => {
-                const optionsObj = {};
-                ["A", "B", "C", "D"].forEach((key, index) => {
-                    optionsObj[key] = q.options[index]?.text || "";
+            const res = await getQuizById(id);
+            const normalizedQuestions = res.questions.map((q) => {
+                const opts = {};
+                ["A", "B", "C", "D"].forEach((key, i) => {
+                    opts[key] = q.options[i]?.text || "";
                 });
-                return {
-                    ...q,
-                    text: q.text, // if needed
-                    options: optionsObj,
-                    correctOption: ["A", "B", "C", "D"][
-                        q.options.findIndex((o) => o._id === q.correctOptionId)
-                    ],
-                };
+                return { ...q, options: opts };
             });
-
-            console.log(normalizedQuestions);
-
-            setQuiz({ ...response, questions: normalizedQuestions });
-
-            if (response.settings?.timerPerQuizSec) {
-                setTimeLeft(response.settings.timerPerQuizSec);
-            }
-        } catch (error) {
-            console.error("Error fetching quiz:", error);
+            setQuiz({ ...res, questions: normalizedQuestions });
+            if (res.settings?.timerPerQuizSec)
+                setTimeLeft(res.settings.timerPerQuizSec);
+        } catch (err) {
             toast.error("Failed to load quiz");
             navigate("/dashboard");
         } finally {
@@ -111,277 +65,492 @@ const QuizAttempt = () => {
         }
     };
 
-    const handleAnswerSelect = (answer) => {
-        setAnswers((prev) => ({
-            ...prev,
-            [currentQuestionIndex]: answer,
-        }));
+    // Global timer
+    useEffect(() => {
+        if (timeLeft === null) return;
+        if (timeLeft <= 0) return handleSubmitAuto();
+        const t = setTimeout(() => setTimeLeft((s) => s - 1), 1000);
+        return () => clearTimeout(t);
+    }, [timeLeft]);
+
+    // Accessibility: close drawer with Escape, focus handling
+    useEffect(() => {
+        const onKeyDown = (e) => {
+            if (e.key === "Escape" && isDrawerOpen) {
+                setIsDrawerOpen(false);
+                drawerButtonRef.current?.focus?.();
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [isDrawerOpen]);
+
+    const handleDraftSelect = (ans) => {
+        setDraftAnswers((prev) => ({ ...prev, [currentQuestionIndex]: ans }));
+        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
     };
 
-    const handleNextQuestion = () => {
-        if (currentQuestionIndex < quiz.questions.length - 1) {
+    const handleAnswerSelect = (ans) => {
+        setDraftAnswers((prev) => ({ ...prev, [currentQuestionIndex]: ans }));
+        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
+    };
+
+    const handleSaveAndNext = () => {
+        const draft = draftAnswers[currentQuestionIndex];
+        if (!draft) return;
+        setAnswers((prev) => ({ ...prev, [currentQuestionIndex]: draft }));
+        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
+        setMarks((m) => {
+            const copy = { ...m };
+            if (copy[currentQuestionIndex] === "marked")
+                delete copy[currentQuestionIndex];
+            copy[currentQuestionIndex] = "answered";
+            return copy;
+        });
+        if (currentQuestionIndex < quiz.questions.length - 1)
             setCurrentQuestionIndex((i) => i + 1);
-        }
     };
 
-    const handlePreviousQuestion = () => {
-        if (currentQuestionIndex > 0) {
-            setCurrentQuestionIndex((i) => i - 1);
-        }
+    const handleClear = () => {
+        setDraftAnswers((prev) => {
+            const copy = { ...prev };
+            delete copy[currentQuestionIndex];
+            return copy;
+        });
+        setAnswers((prev) => {
+            const copy = { ...prev };
+            delete copy[currentQuestionIndex];
+            return copy;
+        });
+        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
+        setMarks((m) => {
+            const copy = { ...m };
+            delete copy[currentQuestionIndex];
+            return copy;
+        });
     };
 
-    const handleAutoSubmit = () => {
-        toast.success("Time is up! Submitting your answers...");
-        submitQuiz();
+    const handleSaveMarkReview = () => {
+        const draft = draftAnswers[currentQuestionIndex];
+        if (!draft) return;
+        setAnswers((prev) => ({ ...prev, [currentQuestionIndex]: draft }));
+        setMarks((m) => ({
+            ...m,
+            [currentQuestionIndex]: "answeredAndMarkForReview",
+        }));
+        if (currentQuestionIndex < quiz.questions.length - 1)
+            setCurrentQuestionIndex((i) => i + 1);
     };
 
-    const submitQuiz = async () => {
-        setSubmitting(true);
+    const handleMarkForReview = () => {
+        setMarks((m) => ({ ...m, [currentQuestionIndex]: "marked" }));
+        if (currentQuestionIndex < quiz.questions.length - 1)
+            setCurrentQuestionIndex((i) => i + 1);
+    };
+
+    const handlePrev = () => {
+        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
+        if (currentQuestionIndex > 0) setCurrentQuestionIndex((i) => i - 1);
+    };
+
+    const handleNext = () => {
+        if (currentQuestionIndex < quiz.questions.length - 1)
+            setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
+        setCurrentQuestionIndex((i) =>
+            Math.min(i + 1, quiz.questions.length - 1)
+        );
+    };
+
+    const handleJump = (i) => {
+        setCurrentQuestionIndex(i);
+        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
+        // setVisited((v) => ({ ...v, [i]: true }));
+    };
+
+    const handleSubmitAuto = () => {
+        toast("Time’s up! Auto submitting...");
+        handleSubmit();
+    };
+
+    const handleSubmit = async () => {
         try {
             const attemptData = {
                 quizId: id,
-                answers: Object.keys(answers).map((questionIndex) => ({
-                    questionIndex: parseInt(questionIndex),
-                    selectedOptionId: answers[questionIndex],
+                answers: Object.keys(answers).map((q) => ({
+                    questionIndex: parseInt(q),
+                    selectedOptionId: answers[q],
                 })),
             };
-
-            const response = await submitAttempt(attemptData);
-            toast.success("Quiz submitted successfully!");
-
-            // Navigate to result page using attempt ID
-            navigate(`/attempt-result/${response.attempt._id}`);
-        } catch (error) {
-            console.error("Error submitting quiz:", error);
-            toast.error("Failed to submit quiz. Please try again.");
-        } finally {
-            setSubmitting(false);
-            setShowSubmitConfirm(false);
+            const res = await submitAttempt(attemptData);
+            toast.success("Submitted!");
+            navigate(`/attempt-result/${res.attempt._id}`);
+        } catch (err) {
+            toast.error("Submit failed!");
         }
     };
 
-    const formatTime = (seconds) => {
-        const minutes = Math.floor(seconds / 60);
-        const remainingSeconds = seconds % 60;
-        return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+    const formatTime = (s) => {
+        const m = Math.floor(s / 60);
+        const sec = (s % 60).toString().padStart(2, "0");
+        return `${m}:${sec}`;
     };
 
-    const getAnsweredCount = () => Object.keys(answers).length;
+    const stats = useMemo(() => {
+        if (!quiz)
+            return {
+                totalQ: 0,
+                answeredCount: 0,
+                markedCount: 0,
+                visitedCount: 0,
+                notVisitedCount: 0,
+                notAnsweredCount: 0,
+            };
+        const totalQ = quiz.questions.length;
+        const answeredCount = Object.keys(answers).length;
+        const markedCount = Object.values(marks).length;
+        const visitedCount = Object.keys(visited).length;
+        const notVisitedCount = totalQ - visitedCount;
+        const notAnsweredCount = Math.max(visitedCount - answeredCount, 0);
+        return {
+            totalQ,
+            answeredCount,
+            markedCount,
+            visitedCount,
+            notVisitedCount,
+            notAnsweredCount,
+        };
+    }, [quiz, answers, marks, visited]);
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-[400px]">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-            </div>
-        );
-    }
+    if (loading) return <div className="text-center p-20">Loading...</div>;
+    if (!quiz) return <div className="text-center p-20">Quiz not found</div>;
 
-    if (!quiz) {
-        return (
-            <div className="text-center py-12">
-                <h2 className="text-xl font-semibold text-foreground">
-                    Quiz not found
-                </h2>
-                <button
-                    onClick={() => navigate("/dashboard")}
-                    className="mt-4 bg-primary text-primary-foreground px-4 py-2 rounded-lg"
-                >
-                    Back to Dashboard
-                </button>
-            </div>
-        );
-    }
+    const q = quiz.questions[currentQuestionIndex];
 
-    const currentQuestion = quiz.questions[currentQuestionIndex];
-    const progress = ((currentQuestionIndex + 1) / quiz.questions.length) * 100;
+    // Palette Button color logic shared
+    const paletteButtonColor = (i) => {
+        const isAns = answers[i];
+        const markStatus = marks[i];
+        const isVis = visited[i];
+        let cls = "bg-gray-300 text-gray-800";
+        if (isAns && markStatus === "answeredAndMarkForReview") {
+            cls = "bg-gradient-to-br from-green-600 to-purple-700 text-white";
+        } else if (isAns && markStatus === "answered") {
+            cls = "bg-green-600 text-white";
+        } else if (markStatus === "marked") {
+            cls = "bg-purple-600 text-white";
+        } else if (!isAns && isVis) {
+            cls = "bg-red-600 text-white";
+        }
+        return cls;
+    };
 
     return (
-        <div className="max-w-4xl mx-auto space-y-6">
-            {/* Header */}
-            <div className="bg-card border border-border rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h1 className="text-2xl font-bold text-foreground">
-                            {quiz.title}
-                        </h1>
-                        <p className="text-muted-foreground">
-                            {quiz.description}
-                        </p>
-                    </div>
-                    <div className="text-right">
-                        {timeLeft !== null && (
-                            <div
-                                className={`flex items-center space-x-2 ${
-                                    timeLeft <= 300
-                                        ? "text-destructive"
-                                        : "text-foreground"
-                                }`}
-                            >
-                                <FiClock className="h-5 w-5" />
-                                <span className="text-lg font-mono font-bold">
-                                    {formatTime(timeLeft)}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">
-                            Question {currentQuestionIndex + 1} of{" "}
+        <div className="relative flex h-screen w-full overflow-hidden">
+            {/* Main area */}
+            <div
+                className={
+                    // Desktop: keep space for side when open; md: smooth width; mobile: full width
+                    `flex flex-col h-full transition-[margin,width] duration-300 ease-out
+           w-full md:w-full lg:${isSideOpen ? "w-[78%]" : "w-full"}`
+                }
+            >
+                {/* Top bar */}
+                <div className="flex items-center justify-between border-b px-3 sm:px-4 py-2 sm:py-3">
+                    <div className="flex items-center gap-2">
+                        {/* Mobile: palette toggle */}
+                        <button
+                            ref={drawerButtonRef}
+                            onClick={() => setIsDrawerOpen(true)}
+                            className="md:hidden inline-flex items-center gap-1 rounded border px-3 py-2 bg-gray-100 hover:bg-gray-200 active:scale-[0.99] transition"
+                            aria-controls="question-palette-drawer"
+                            aria-expanded={isDrawerOpen}
+                            aria-label="Open question palette"
+                        >
+                            <FiGrid className="text-base" />
+                            <span className="text-sm">Palette</span>
+                        </button>
+                        <span className="font-semibold text-base sm:text-lg">
+                            Question {currentQuestionIndex + 1} /{" "}
                             {quiz.questions.length}
                         </span>
-                        <span className="text-muted-foreground ">
-                            {getAnsweredCount()} answered
-                        </span>
                     </div>
-                    <div className="w-full bg-muted rounded-full h-2">
-                        <div
-                            className="bg-primary h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${progress}%` }}
-                        ></div>
+
+                    <span
+                        className={`font-bold tabular-nums ${
+                            timeLeft < 300 ? "text-red-600" : ""
+                        }`}
+                        aria-live="polite"
+                    >
+                        <FiClock className="inline mr-1 align-[-2px]" />
+                        {formatTime(timeLeft)}
+                    </span>
+                </div>
+
+                {/* Question content scroll area */}
+                <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 sm:py-4">
+                    <QuestionCard
+                        question={q}
+                        questionIndex={currentQuestionIndex}
+                        selectedAnswer={
+                            draftAnswers[currentQuestionIndex] ?? null
+                        }
+                        onAnswerSelect={handleAnswerSelect}
+                    />
+                </div>
+
+                {/* Bottom actions: mobile sticky bar, md+ inline toolbar */}
+                <div
+                    className="
+            border-t
+            md:static md:bottom-auto md:left-auto md:right-auto
+            md:bg-transparent
+            md:px-4 md:py-3
+            fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur
+            px-3 py-2
+          "
+                >
+                    <div className="flex items-center justify-between gap-2 mt-[-110px]">
+                        <button
+                            onClick={handlePrev}
+                            disabled={currentQuestionIndex === 0}
+                            className="px-3 sm:px-4 py-2 border rounded disabled:opacity-50 hover:bg-gray-50 transition"
+                        >
+                            <FiChevronsLeft className="inline mr-1" /> Previous
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={handleClear}
+                                className="px-3 sm:px-4 py-2 border rounded bg-gray-100 hover:bg-gray-200 transition"
+                            >
+                                Clear
+                            </button>
+                            <button
+                                onClick={handleSaveMarkReview}
+                                className="px-3 sm:px-4 py-2 border rounded bg-purple-100 text-purple-800 hover:bg-purple-200 transition"
+                            >
+                                Save & Mark for Review
+                            </button>
+                            <button
+                                onClick={handleMarkForReview}
+                                className="px-3 sm:px-4 py-2 border rounded bg-purple-200 text-purple-900 hover:bg-purple-300 transition"
+                            >
+                                Mark for Review & Next
+                            </button>
+                            <button
+                                onClick={handleSaveAndNext}
+                                disabled={!draftAnswers[currentQuestionIndex]}
+                                className="px-3 sm:px-4 py-2 border rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
+                            >
+                                {currentQuestionIndex ===
+                                quiz.questions.length - 1
+                                    ? "Save"
+                                    : "Save & Next"}
+                                <FiChevronRight className="inline ml-1" />
+                            </button>
+                            {currentQuestionIndex ===
+                                quiz.questions.length - 1 && (
+                                <button
+                                    onClick={handleSubmit}
+                                    className="px-3 sm:px-4 py-2 border rounded bg-blue-600 text-white hover:bg-blue-700 transition"
+                                >
+                                    Submit
+                                </button>
+                            )}
+                        </div>
+
+                        <button
+                            onClick={handleNext}
+                            disabled={
+                                currentQuestionIndex ===
+                                quiz.questions.length - 1
+                            }
+                            className="px-3 sm:px-4 py-2 border rounded disabled:opacity-50 hover:bg-gray-50 transition"
+                        >
+                            <FiChevronsRight className="inline mr-1" /> Next
+                        </button>
                     </div>
                 </div>
             </div>
 
-            {/* Question */}
-            <QuestionCard
-                question={currentQuestion}
-                questionIndex={currentQuestionIndex}
-                selectedAnswer={answers[currentQuestionIndex]}
-                onAnswerSelect={handleAnswerSelect}
-                timeLeft={questionTimeLeft}
-            />
+            {/* Right palette: md+ inline sidebar */}
+            {/* Side Palette Panel */}
+            <div
+                className={`
+    fixed md:static top-0 right-0 h-full bg-white shadow-xl border-l
+    transform transition-transform duration-300 ease-in-out
+    ${isSideOpen ? "translate-x-0" : "translate-x-full"}
+    md:translate-x-0
+    ${isSideOpen ? "w-72 md:w-[28%] lg:w-[24%] xl:w-[22%]" : "w-0 md:w-0"}
+    flex flex-col
+    z-50
+  `}
+                aria-hidden={!isSideOpen}
+            >
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+                    <span className="font-semibold text-gray-800">
+                        Questions
+                    </span>
+                    <button
+                        onClick={() => setIsSideOpen(false)}
+                        className="text-gray-500 hover:text-black rounded p-1 transition"
+                        aria-label="Collapse questions panel"
+                        title="Collapse"
+                    >
+                        &gt;
+                    </button>
+                </div>
 
-            {/* Navigation */}
-            <div className="flex items-center justify-between">
-                <button
-                    onClick={handlePreviousQuestion}
-                    disabled={currentQuestionIndex === 0}
-                    className="flex items-center space-x-2 px-4 py-2 border border-border text-foreground rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                >
-                    <FiChevronLeft className="h-4 w-4" />
-                    <span>Previous</span>
-                </button>
+                {/* Legend */}
+                <div className="grid grid-cols-2 gap-3 text-xs p-4 border-b bg-white">
+                    <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-gray-300 rounded" />
+                        <span>Not Visited ({stats.notVisitedCount})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-red-500 rounded" />
+                        <span>Not Answered ({stats.notAnsweredCount})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-green-500 rounded" />
+                        <span>Answered ({stats.answeredCount})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-purple-600 rounded" />
+                        <span>Marked ({stats.markedCount})</span>
+                    </div>
+                    <div className="flex items-center gap-2 col-span-2">
+                        <span className="w-4 h-4 bg-gradient-to-br from-green-500 to-purple-600 rounded" />
+                        <span>Answered & Marked</span>
+                    </div>
+                </div>
 
-                <div className="flex items-center space-x-4">
-                    <div className="hidden md:flex items-center space-x-2">
-                        {quiz.questions.map((_, index) => (
+                {/* Palette grid */}
+                <div className="p-4 overflow-y-auto flex-1">
+                    <div className="flex flex-wrap gap-[10px]">
+                        {quiz.questions.map((_, i) => (
                             <button
-                                key={index}
-                                onClick={() => setCurrentQuestionIndex(index)}
+                                key={i}
+                                onClick={() => handleJump(i)}
                                 className={`
-                  w-8 h-8 rounded-full text-sm font-medium transition-all duration-200
-                  ${
-                      index === currentQuestionIndex
-                          ? "bg-primary text-primary-foreground"
-                          : answers[index]
-                          ? "bg-success text-success-foreground"
-                          : "bg-muted text-muted-foreground hover:bg-border"
-                  }
-                `}
+            w-10 h-10 flex items-center justify-center rounded-md text-sm font-semibold shadow
+            ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
+            ${paletteButtonColor(i)}
+          `}
+                                aria-label={`Question ${i + 1}`}
                             >
-                                {index + 1}
+                                {i + 1}
                             </button>
                         ))}
                     </div>
                 </div>
-
-                {currentQuestionIndex === quiz.questions.length - 1 ? (
-                    <button
-                        onClick={() => setShowSubmitConfirm(true)}
-                        className="flex items-center space-x-2 bg-success text-success-foreground px-6 py-2 rounded-lg hover:bg-success/90 transition-colors duration-200"
-                    >
-                        <FiCheck className="h-4 w-4" />
-                        <span>Submit Quiz</span>
-                    </button>
-                ) : (
-                    <button
-                        onClick={handleNextQuestion}
-                        className="flex items-center space-x-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary-light transition-colors duration-200"
-                    >
-                        <span>Next</span>
-                        <FiChevronRight className="h-4 w-4" />
-                    </button>
-                )}
             </div>
 
-            {/* Submit Confirmation Modal */}
-            {showSubmitConfirm && (
-                <div className="fixed inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-card border border-border shadow-xl rounded-2xl p-6 max-w-md w-full mx-4 animate-fadeIn">
-                        {/* Header */}
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="bg-warning/10 p-2 rounded-full">
-                                <FiAlertCircle className="h-6 w-6 text-warning" />
-                            </div>
-                            <h3 className="text-lg font-semibold text-foreground">
-                                Submit Quiz?
-                            </h3>
+            {/* Inline collapsed toggle button for md+ when closed */}
+            {!isSideOpen && (
+                <button
+                    onClick={() => setIsSideOpen(true)}
+                    className="hidden md:block absolute right-0 top-1/2 -translate-y-1/2 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-l shadow transition"
+                    aria-label="Expand questions panel"
+                    title="Expand"
+                >
+                    &lt;
+                </button>
+            )}
+
+            {/* Mobile/Tablet Drawer: slide-in left with overlay (md:hidden) */}
+            <div
+                id="question-palette-drawer"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="drawer-title"
+                className={`
+          md:hidden fixed inset-0 z-50 ${
+              isDrawerOpen ? "" : "pointer-events-none"
+          }
+        `}
+            >
+                {/* Overlay */}
+                <div
+                    onClick={() => setIsDrawerOpen(false)}
+                    className={`
+            absolute inset-0 bg-black/40 transition-opacity duration-300 ease-out
+            ${isDrawerOpen ? "opacity-100" : "opacity-0"}
+          `}
+                />
+
+                {/* Panel */}
+                <div
+                    ref={drawerPanelRef}
+                    className={`
+            absolute left-0 top-0 h-full w-[85%] max-w-[400px] bg-white shadow-2xl border-r
+            transition-transform duration-300 ease-out
+            ${isDrawerOpen ? "translate-x-0" : "-translate-x-full"}
+            flex flex-col
+          `}
+                >
+                    <div className="flex items-center justify-between p-3 border-b">
+                        <span id="drawer-title" className="font-semibold">
+                            Questions
+                        </span>
+                        <button
+                            onClick={() => setIsDrawerOpen(false)}
+                            className="p-2 rounded hover:bg-gray-100 active:scale-95 transition"
+                            aria-label="Close question palette"
+                        >
+                            <FiX className="text-xl" />
+                        </button>
+                    </div>
+
+                    {/* Legend */}
+                    <div className="grid grid-cols-2 gap-2 text-xs p-3 border-b">
+                        <div className="flex items-center gap-2">
+                            <span className="w-4 h-4 bg-gray-300 inline-block rounded" />
+                            <span>Not Visited ({stats.notVisitedCount})</span>
                         </div>
-
-                        {/* Body */}
-                        <div className="space-y-4 mb-6 text-sm text-muted-foreground">
-                            <p>
-                                Are you sure you want to submit your quiz?{" "}
-                                <br />
-                                <span className="text-foreground font-medium">
-                                    You won’t be able to change your answers
-                                    after submission.
-                                </span>
-                            </p>
-
-                            <div className="bg-muted rounded-lg p-4 space-y-2 text-foreground">
-                                <div className="flex justify-between">
-                                    <span>Total Questions:</span>
-                                    <span className="font-semibold">
-                                        {quiz.questions.length}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Answered:</span>
-                                    <span className="font-semibold">
-                                        {getAnsweredCount()}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span>Unanswered:</span>
-                                    <span className="font-semibold">
-                                        {quiz.questions.length -
-                                            getAnsweredCount()}
-                                    </span>
-                                </div>
-                            </div>
+                        <div className="flex items-center gap-2">
+                            <span className="w-4 h-4 bg-red-600 inline-block rounded" />
+                            <span>Not Answered ({stats.notAnsweredCount})</span>
                         </div>
+                        <div className="flex items-center gap-2">
+                            <span className="w-4 h-4 bg-green-600 inline-block rounded" />
+                            <span>Answered ({stats.answeredCount})</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="w-4 h-4 bg-purple-600 inline-block rounded" />
+                            <span>Marked for Review ({stats.markedCount})</span>
+                        </div>
+                        <div className="flex items-center gap-2 col-span-2">
+                            <span className="w-4 h-4 bg-gradient-to-br from-green-600 to-purple-700 inline-block rounded" />
+                            <span>Answered & Marked (considered)</span>
+                        </div>
+                    </div>
 
-                        {/* Actions */}
-                        <div className="flex gap-3">
-                            <button
-                                onClick={() => setShowSubmitConfirm(false)}
-                                className="flex-1 px-4 py-2 border border-gray-700 text-foreground rounded-lg hover:bg-muted transition-colors duration-200"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={submitQuiz}
-                                disabled={submitting}
-                                className="flex-1 flex items-center justify-center gap-2 bg-success text-success-foreground px-4 py-2 rounded-lg hover:bg-success/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
-                            >
-                                {submitting ? (
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                                ) : (
-                                    <>
-                                        <FiCheck className="h-4 w-4" />
-                                        <span>Submit</span>
-                                    </>
-                                )}
-                            </button>
+                    {/* Palette grid */}
+                    <div className="p-3 overflow-y-auto">
+                        <div className="grid grid-cols-6 gap-2">
+                            {quiz.questions.map((_, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => {
+                                        handleJump(i);
+                                        setIsDrawerOpen(false);
+                                    }}
+                                    className={`
+                    w-10 h-10 flex items-center justify-center rounded-md text-sm font-semibold shadow-sm
+                    ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
+                    ${paletteButtonColor(i)}
+                  `}
+                                    aria-label={`Question ${i + 1}`}
+                                >
+                                    {i + 1}
+                                </button>
+                            ))}
                         </div>
                     </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

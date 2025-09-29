@@ -16,8 +16,9 @@ const QuestionCard = ({
 }) => {
     const [isEditing, setIsEditing] = useState(false);
     const [editedQuestion, setEditedQuestion] = useState(question);
+    const [tempAnswer, setTempAnswer] = useState(selectedAnswer || null);
 
-    // Convert editedQuestion to backend format
+    // Convert editedQuestion to backend format (not directly used here but kept for consistency)
     const getBackendFormat = (q) => {
         return {
             text: q.text,
@@ -32,7 +33,6 @@ const QuestionCard = ({
 
     const handleSaveEdit = () => {
         if (onEdit) {
-            // Pass edited question exactly as object (keep marks, timer, options)
             onEdit(questionIndex, { ...editedQuestion });
         }
         setIsEditing(false);
@@ -50,6 +50,7 @@ const QuestionCard = ({
         return null;
     };
 
+    // Edit mode UI
     if (isEditing) {
         return (
             <div className="bg-card border border-border rounded-lg p-6">
@@ -123,6 +124,7 @@ const QuestionCard = ({
         );
     }
 
+    // Normal (view/attempt) mode
     return (
         <div className="bg-card border border-border rounded-lg p-6 animate-fade-in">
             {/* Header */}
@@ -135,7 +137,12 @@ const QuestionCard = ({
                         {timeLeft !== null && timeLeft <= 30 && (
                             <div className="flex items-center space-x-2 text-quiz-timer">
                                 <FiClock className="h-4 w-4" />
-                                <span className="font-medium">{timeLeft}s</span>
+                                <span className="font-medium">
+                                    {Math.floor(timeLeft / 60)}:
+                                    {(timeLeft % 60)
+                                        .toString()
+                                        .padStart(2, "0")}
+                                </span>
                             </div>
                         )}
                     </div>
@@ -191,12 +198,23 @@ const QuestionCard = ({
                 <div className="mt-4 pt-4 border-t border-border">
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
                         {question.marks && <span>Marks: {question.marks}</span>}
-                        {question.timer && <span>Time: {question.timer}s</span>}
+                        {question.timer && (
+                            <span>
+                                Time: {Math.floor((question.timer * 60) / 60)}m
+                                {(question.timer * 60) % 60 !== 0
+                                    ? ` ${(question.timer * 60) % 60}s`
+                                    : ""}
+                            </span>
+                        )}
                     </div>
                 </div>
             )}
-            {showCorrectAnswer && (
-                <div>{`${getOptionResult()} correct ans: ${correctAnswer}`}</div>
+
+            {/* Correct answer info */}
+            {showCorrectAnswer && correctAnswer && (
+                <div className="mt-3 text-sm font-medium text-primary">
+                    Correct Answer: {correctAnswer}
+                </div>
             )}
         </div>
     );
