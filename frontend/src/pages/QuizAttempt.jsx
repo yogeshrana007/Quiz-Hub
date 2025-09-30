@@ -1,17 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
 import toast from "react-hot-toast";
 import {
-    FiChevronRight,
     FiChevronsLeft,
     FiChevronsRight,
     FiClock,
     FiGrid,
     FiX,
 } from "react-icons/fi";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+    UNSAFE_NavigationContext,
+    useNavigate,
+    useParams,
+} from "react-router-dom";
 import { useAttemptsAPI } from "../api/attempts.js";
 import { useQuizzesAPI } from "../api/quizzes.js";
 import QuestionCard from "../components/QuestionCard.jsx";
+
+function useBlocker(blocker, when = true) {
+    const { navigator } = React.useContext(UNSAFE_NavigationContext);
+
+    React.useEffect(() => {
+        if (!when) return;
+
+        const push = navigator.push;
+        const replace = navigator.replace;
+
+        navigator.push = (...args) => {
+            if (blocker()) {
+                push(...args);
+            }
+        };
+
+        navigator.replace = (...args) => {
+            if (blocker()) {
+                replace(...args);
+            }
+        };
+
+        return () => {
+            navigator.push = push;
+            navigator.replace = replace;
+        };
+    }, [navigator, blocker, when]);
+}
 
 const QuizAttempt = () => {
     const { id } = useParams();
@@ -55,8 +87,31 @@ const QuizAttempt = () => {
                 return { ...q, options: opts };
             });
             setQuiz({ ...res, questions: normalizedQuestions });
-            if (res.settings?.timerPerQuizSec)
-                setTimeLeft(res.settings.timerPerQuizSec);
+
+            if (res.settings?.timerPerQuizSec) {
+                // Preserve timer if already started
+                const savedStartTime = localStorage.getItem(
+                    `quiz_${id}_startTime`
+                );
+                let startTime;
+                if (savedStartTime) {
+                    startTime = parseInt(savedStartTime);
+                } else {
+                    startTime = Date.now();
+                    localStorage.setItem(`quiz_${id}_startTime`, startTime);
+                }
+
+                const totalTime = res.settings.timerPerQuizSec * 1000;
+                const elapsed = Date.now() - startTime;
+                const remaining = Math.max(
+                    Math.floor((totalTime - elapsed) / 1000),
+                    0
+                );
+                setTimeLeft(remaining);
+            }
+
+            // if (res.settings?.timerPerQuizSec)
+            //     setTimeLeft(res.settings.timerPerQuizSec);
         } catch (err) {
             toast.error("Failed to load quiz");
             navigate("/dashboard");
@@ -66,12 +121,28 @@ const QuizAttempt = () => {
     };
 
     // Global timer
+    // Global timer fix (doesn't pause on tab change)
     useEffect(() => {
         if (timeLeft === null) return;
-        if (timeLeft <= 0) return handleSubmitAuto();
-        const t = setTimeout(() => setTimeLeft((s) => s - 1), 1000);
-        return () => clearTimeout(t);
-    }, [timeLeft]);
+        const interval = setInterval(() => {
+            const savedStartTime = parseInt(
+                localStorage.getItem(`quiz_${id}_startTime`)
+            );
+            const totalTime = quiz.settings.timerPerQuizSec * 1000;
+            const elapsed = Date.now() - savedStartTime;
+            const remaining = Math.max(
+                Math.floor((totalTime - elapsed) / 1000),
+                0
+            );
+            setTimeLeft(remaining);
+            if (remaining <= 0) {
+                clearInterval(interval);
+                handleSubmitAuto();
+            }
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [quiz, id]);
 
     // Accessibility: close drawer with Escape, focus handling
     useEffect(() => {
@@ -89,6 +160,33 @@ const QuizAttempt = () => {
         setDraftAnswers((prev) => ({ ...prev, [currentQuestionIndex]: ans }));
         setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
     };
+
+    // Warn before leaving / refreshing
+    useEffect(() => {
+        const handleBeforeUnload = (e) => {
+            e.preventDefault();
+            e.returnValue =
+                "Are you sure? Your quiz will be submitted if you leave!";
+        };
+
+        window.addEventListener("beforeunload", handleBeforeUnload);
+
+        return () => {
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, []);
+
+    useBlocker(() => {
+        const confirmLeave = window.confirm(
+            "Are you sure? Leaving will submit your quiz."
+        );
+        if (confirmLeave) {
+            handleSubmit();
+        }
+        return confirmLeave; // allow if true
+    });
+    // Block navigation away from QuizAttempt
+    useEffect(() => {}, []);
 
     const handleSaveAndNext = () => {
         const draft = draftAnswers[currentQuestionIndex];
@@ -176,6 +274,7 @@ const QuizAttempt = () => {
             };
             const res = await submitAttempt(attemptData);
             toast.success("Submitted!");
+            localStorage.removeItem(`quiz_${id}_startTime`);
             navigate(`/attempt-result/${res.attempt._id}`);
         } catch (err) {
             toast.error("Submit failed!");
@@ -244,7 +343,7 @@ const QuizAttempt = () => {
 
         switch (markStatus) {
             case "answeredAndMarkForReview":
-                return "bg-gradient-to-br from-green-600 to-purple-700 text-white";
+                return "bg-purple-600 text-white relative"; // make relative for dot
             case "answered":
                 return "bg-green-600 text-white";
             case "marked":
@@ -296,6 +395,18 @@ const QuizAttempt = () => {
                         <FiClock className="inline mr-1 align-[-2px]" />
                         {formatTime(timeLeft)}
                     </span>
+                    <button
+                        onClick={() => {
+                            if (!document.fullscreenElement) {
+                                document.documentElement.requestFullscreen();
+                            } else {
+                                document.exitFullscreen();
+                            }
+                        }}
+                        className="px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200"
+                    >
+                        Fullscreen
+                    </button>
                 </div>
 
                 {/* Question content scroll area */}
@@ -317,7 +428,7 @@ const QuizAttempt = () => {
             md:static md:bottom-auto md:left-auto md:right-auto
             md:bg-transparent
             md:px-4 md:py-3
-            fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur
+            fixed left-0 right-0 bg-white/95 backdrop-blur
             px-3 py-2
             
           "
@@ -358,8 +469,8 @@ const QuizAttempt = () => {
                                 {currentQuestionIndex ===
                                 quiz.questions.length - 1
                                     ? "Save"
-                                    : "Save & Next"}
-                                <FiChevronRight className="inline ml-1" />
+                                    : `Save & Next`}
+                                {/* <FiChevronRight className="inline ml-1" /> */}
                             </button>
                             {currentQuestionIndex ===
                                 quiz.questions.length - 1 && (
@@ -380,7 +491,7 @@ const QuizAttempt = () => {
                             }
                             className="px-3 sm:px-4 py-2 border rounded disabled:opacity-50 hover:bg-gray-50 transition"
                         >
-                            <FiChevronsRight className="inline mr-1" /> Next
+                            Next <FiChevronsRight className="inline mr-1" />
                         </button>
                     </div>
                 </div>
@@ -390,7 +501,7 @@ const QuizAttempt = () => {
             {/* Side Palette Panel */}
             <div
                 className={`
-    fixed md:static top-0 right-0 h-full bg-white shadow-xl border-l
+    fixed md:static top-0 right-0 h-[500px] bg-white shadow-xl border-l
     transform transition-transform duration-300 ease-in-out
     ${isSideOpen ? "translate-x-0" : "translate-x-full"}
     md:translate-x-0
@@ -432,7 +543,7 @@ const QuizAttempt = () => {
                     {/* Not Answered (Triangle) */}
                     <div className="flex items-center gap-2">
                         <div className="w-0 h-0 border-l-[20px] border-r-[20px] border-b-[35px] border-l-transparent border-r-transparent border-b-orange-600 relative">
-                            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-white text-sm font-bold">
+                            <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-white text-sm font-bold">
                                 {stats.notAnsweredCount}
                             </span>
                         </div>
@@ -457,10 +568,10 @@ const QuizAttempt = () => {
 
                     {/* Answered & Marked for Review (Circle + tick icon / mini square) */}
                     <div className="flex items-center gap-2">
-                        <div className="relative w-10 h-10 flex items-center justify-center bg-gradient-to-br from-green-600 to-purple-700 text-white rounded-full">
+                        <div className="relative w-10 h-10 flex items-center justify-center bg-purple-600 text-white rounded-full">
                             {stats.answeredAndMarkedCount}
-                            {/* Mini box at corner */}
-                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border rounded-sm"></div>
+                            {/* Green dot at bottom-right */}
+                            <span className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-purple-600"></span>
                         </div>
                         <span>Answered & Marked for Review</span>
                     </div>
@@ -474,13 +585,17 @@ const QuizAttempt = () => {
                                 key={i}
                                 onClick={() => handleJump(i)}
                                 className={`
-            w-12 h-12 flex items-center justify-center rounded-md text-sm font-semibold shadow
-            ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
-            ${paletteButtonColor(i)}
-          `}
+          w-12 h-12 flex items-center justify-center rounded-full text-sm font-semibold shadow
+          ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
+          ${paletteButtonColor(i)}
+        `}
                                 aria-label={`Question ${i + 1}`}
                             >
                                 {i + 1}
+                                {/* Add green dot for answeredAndMarkForReview */}
+                                {marks[i] === "answeredAndMarkForReview" && (
+                                    <span className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-purple-600"></span>
+                                )}
                             </button>
                         ))}
                     </div>
@@ -520,7 +635,7 @@ const QuizAttempt = () => {
           `}
                 />
 
-                {/* Panel */}
+                {/* Panel small*/}
                 <div
                     ref={drawerPanelRef}
                     className={`
@@ -532,7 +647,7 @@ const QuizAttempt = () => {
                 >
                     <div className="flex items-center justify-between p-3 border-b">
                         <span id="drawer-title" className="font-semibold">
-                            Questions1
+                            Questions
                         </span>
                         <button
                             onClick={() => setIsDrawerOpen(false)}
@@ -556,7 +671,7 @@ const QuizAttempt = () => {
                         {/* Not Answered (Triangle) */}
                         <div className="flex items-center gap-2">
                             <div className="w-0 h-0 border-l-[20px] border-r-[20px] border-b-[35px] border-l-transparent border-r-transparent border-b-orange-600 relative">
-                                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-white text-sm font-bold">
+                                <span className="absolute -bottom-7 left-1/2 -translate-x-1/2 text-white text-sm font-bold">
                                     {stats.notAnsweredCount}
                                 </span>
                             </div>
@@ -581,33 +696,35 @@ const QuizAttempt = () => {
 
                         {/* Answered & Marked for Review (Circle + tick icon / mini square) */}
                         <div className="flex items-center gap-2">
-                            <div className="relative w-10 h-10 flex items-center justify-center bg-gradient-to-br from-green-600 to-purple-700 text-white rounded-full">
+                            <div className="relative w-10 h-10 flex items-center justify-center bg-purple-600 text-white rounded-full">
                                 {stats.answeredAndMarkedCount}
-                                {/* Mini box at corner */}
-                                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border rounded-sm"></div>
+                                {/* Green dot at bottom-right */}
+                                <span className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-purple-600"></span>
                             </div>
                             <span>Answered & Marked for Review</span>
                         </div>
                     </div>
                     <hr />
                     {/* Palette grid */}
-                    <div className="p-3 overflow-y-auto mt-[10px]">
-                        <div className="grid grid-cols-6 gap-2">
+                    <div className="p-4 overflow-y-auto flex-1">
+                        <div className="flex flex-wrap gap-[12px]">
                             {quiz.questions.map((_, i) => (
                                 <button
                                     key={i}
-                                    onClick={() => {
-                                        handleJump(i);
-                                        setIsDrawerOpen(false);
-                                    }}
+                                    onClick={() => handleJump(i)}
                                     className={`
-                    w-10 h-10 flex items-center justify-center rounded-md text-sm font-semibold shadow-sm
-                    ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
-                    ${paletteButtonColor(i)}
-                  `}
+          w-12 h-12 flex items-center justify-center rounded-full text-sm font-semibold shadow
+          ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
+          ${paletteButtonColor(i)}
+        `}
                                     aria-label={`Question ${i + 1}`}
                                 >
                                     {i + 1}
+                                    {/* Add green dot for answeredAndMarkForReview */}
+                                    {marks[i] ===
+                                        "answeredAndMarkForReview" && (
+                                        <span className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-purple-600"></span>
+                                    )}
                                 </button>
                             ))}
                         </div>
