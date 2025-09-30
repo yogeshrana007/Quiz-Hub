@@ -85,11 +85,6 @@ const QuizAttempt = () => {
         return () => window.removeEventListener("keydown", onKeyDown);
     }, [isDrawerOpen]);
 
-    const handleDraftSelect = (ans) => {
-        setDraftAnswers((prev) => ({ ...prev, [currentQuestionIndex]: ans }));
-        setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
-    };
-
     const handleAnswerSelect = (ans) => {
         setDraftAnswers((prev) => ({ ...prev, [currentQuestionIndex]: ans }));
         setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
@@ -100,13 +95,11 @@ const QuizAttempt = () => {
         if (!draft) return;
         setAnswers((prev) => ({ ...prev, [currentQuestionIndex]: draft }));
         setVisited((v) => ({ ...v, [currentQuestionIndex]: true }));
-        setMarks((m) => {
-            const copy = { ...m };
-            if (copy[currentQuestionIndex] === "marked")
-                delete copy[currentQuestionIndex];
-            copy[currentQuestionIndex] = "answered";
-            return copy;
-        });
+        setMarks((m) => ({
+            ...m,
+            [currentQuestionIndex]: "answered",
+        }));
+
         if (currentQuestionIndex < quiz.questions.length - 1)
             setCurrentQuestionIndex((i) => i + 1);
     };
@@ -201,20 +194,38 @@ const QuizAttempt = () => {
                 totalQ: 0,
                 answeredCount: 0,
                 markedCount: 0,
+                answeredAndMarkedCount: 0,
                 visitedCount: 0,
                 notVisitedCount: 0,
                 notAnsweredCount: 0,
             };
         const totalQ = quiz.questions.length;
-        const answeredCount = Object.keys(answers).length;
-        const markedCount = Object.values(marks).length;
+
+        const answeredCount = Object.values(marks).filter(
+            (m) => m === "answered"
+        ).length;
+        const markedCount = Object.values(marks).filter(
+            (m) => m === "marked"
+        ).length;
+        const answeredAndMarkedCount = Object.values(marks).filter(
+            (m) => m === "answeredAndMarkForReview"
+        ).length;
+
         const visitedCount = Object.keys(visited).length;
         const notVisitedCount = totalQ - visitedCount;
-        const notAnsweredCount = Math.max(visitedCount - answeredCount, 0);
+
+        const notAnsweredCount =
+            totalQ -
+            (answeredCount + answeredAndMarkedCount) -
+            markedCount -
+            notVisitedCount;
+
         return {
             totalQ,
             answeredCount,
             markedCount,
+            answeredAndMarkedCount,
+
             visitedCount,
             notVisitedCount,
             notAnsweredCount,
@@ -228,20 +239,21 @@ const QuizAttempt = () => {
 
     // Palette Button color logic shared
     const paletteButtonColor = (i) => {
-        const isAns = answers[i];
         const markStatus = marks[i];
         const isVis = visited[i];
-        let cls = "bg-gray-300 text-gray-800";
-        if (isAns && markStatus === "answeredAndMarkForReview") {
-            cls = "bg-gradient-to-br from-green-600 to-purple-700 text-white";
-        } else if (isAns && markStatus === "answered") {
-            cls = "bg-green-600 text-white";
-        } else if (markStatus === "marked") {
-            cls = "bg-purple-600 text-white";
-        } else if (!isAns && isVis) {
-            cls = "bg-red-600 text-white";
+
+        switch (markStatus) {
+            case "answeredAndMarkForReview":
+                return "bg-gradient-to-br from-green-600 to-purple-700 text-white";
+            case "answered":
+                return "bg-green-600 text-white";
+            case "marked":
+                return "bg-purple-600 text-white";
+            default:
+                return isVis
+                    ? "bg-red-600 text-white"
+                    : "bg-gray-300 text-gray-800";
         }
-        return cls;
     };
 
     return (
@@ -287,7 +299,7 @@ const QuizAttempt = () => {
                 </div>
 
                 {/* Question content scroll area */}
-                <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 sm:py-4">
+                <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 sm:py-4 sm:mb-4">
                     <QuestionCard
                         question={q}
                         questionIndex={currentQuestionIndex}
@@ -307,9 +319,10 @@ const QuizAttempt = () => {
             md:px-4 md:py-3
             fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur
             px-3 py-2
+            
           "
                 >
-                    <div className="flex items-center justify-between gap-2 mt-[-110px]">
+                    <div className="flex flex-wrap items-center justify-between gap-2  md:mt-[-110px]">
                         <button
                             onClick={handlePrev}
                             disabled={currentQuestionIndex === 0}
@@ -381,7 +394,11 @@ const QuizAttempt = () => {
     transform transition-transform duration-300 ease-in-out
     ${isSideOpen ? "translate-x-0" : "translate-x-full"}
     md:translate-x-0
-    ${isSideOpen ? "w-72 md:w-[28%] lg:w-[24%] xl:w-[22%]" : "w-0 md:w-0"}
+    ${
+        isSideOpen
+            ? "sm:w-0 xs:w-0 w-74 md:w-[28%] lg:w-[32%] xl:w-[27%]"
+            : "w-0 md:w-0 sm:w-0 xs:w-0"
+    }
     flex flex-col
     z-50
   `}
@@ -403,38 +420,61 @@ const QuizAttempt = () => {
                 </div>
 
                 {/* Legend */}
-                <div className="grid grid-cols-2 gap-3 text-xs p-4 border-b bg-white">
+                <div className="flex flex-wrap gap-4 m-2 w-full sm:w-[400px]">
+                    {/* Not Visited (Square) */}
                     <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-gray-300 rounded" />
-                        <span>Not Visited ({stats.notVisitedCount})</span>
+                        <div className="w-10 h-10 flex items-center justify-center border bg-gray-200 text-black rounded">
+                            {stats.notVisitedCount}
+                        </div>
+                        <span>Not Visited</span>
                     </div>
+
+                    {/* Not Answered (Triangle) */}
                     <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-red-500 rounded" />
-                        <span>Not Answered ({stats.notAnsweredCount})</span>
+                        <div className="w-0 h-0 border-l-[20px] border-r-[20px] border-b-[35px] border-l-transparent border-r-transparent border-b-orange-600 relative">
+                            <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-white text-sm font-bold">
+                                {stats.notAnsweredCount}
+                            </span>
+                        </div>
+                        <span>Not Answered</span>
                     </div>
+
+                    {/* Answered (Square green) */}
                     <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-green-500 rounded" />
-                        <span>Answered ({stats.answeredCount})</span>
+                        <div className="w-10 h-10 flex items-center justify-center bg-green-600 text-white rounded">
+                            {stats.answeredCount}
+                        </div>
+                        <span>Answered</span>
                     </div>
+
+                    {/* Marked for Review (Circle purple) */}
                     <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-purple-600 rounded" />
-                        <span>Marked ({stats.markedCount})</span>
+                        <div className="w-10 h-10 flex items-center justify-center bg-purple-600 text-white rounded-full">
+                            {stats.markedCount}
+                        </div>
+                        <span>Marked for Review</span>
                     </div>
-                    <div className="flex items-center gap-2 col-span-2">
-                        <span className="w-4 h-4 bg-gradient-to-br from-green-500 to-purple-600 rounded" />
-                        <span>Answered & Marked</span>
+
+                    {/* Answered & Marked for Review (Circle + tick icon / mini square) */}
+                    <div className="flex items-center gap-2">
+                        <div className="relative w-10 h-10 flex items-center justify-center bg-gradient-to-br from-green-600 to-purple-700 text-white rounded-full">
+                            {stats.answeredAndMarkedCount}
+                            {/* Mini box at corner */}
+                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border rounded-sm"></div>
+                        </div>
+                        <span>Answered & Marked for Review</span>
                     </div>
                 </div>
-
+                <hr className="mx-[5%]" />
                 {/* Palette grid */}
                 <div className="p-4 overflow-y-auto flex-1">
-                    <div className="flex flex-wrap gap-[10px]">
+                    <div className="flex flex-wrap gap-[12px]">
                         {quiz.questions.map((_, i) => (
                             <button
                                 key={i}
                                 onClick={() => handleJump(i)}
                                 className={`
-            w-10 h-10 flex items-center justify-center rounded-md text-sm font-semibold shadow
+            w-12 h-12 flex items-center justify-center rounded-md text-sm font-semibold shadow
             ${currentQuestionIndex === i ? "ring-2 ring-black" : ""}
             ${paletteButtonColor(i)}
           `}
@@ -492,7 +532,7 @@ const QuizAttempt = () => {
                 >
                     <div className="flex items-center justify-between p-3 border-b">
                         <span id="drawer-title" className="font-semibold">
-                            Questions
+                            Questions1
                         </span>
                         <button
                             onClick={() => setIsDrawerOpen(false)}
@@ -504,31 +544,54 @@ const QuizAttempt = () => {
                     </div>
 
                     {/* Legend */}
-                    <div className="grid grid-cols-2 gap-2 text-xs p-3 border-b">
+                    <div className="flex flex-wrap gap-4 m-[10px]">
+                        {/* Not Visited (Square) */}
                         <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 bg-gray-300 inline-block rounded" />
-                            <span>Not Visited ({stats.notVisitedCount})</span>
+                            <div className="w-10 h-10 flex items-center justify-center border bg-gray-200 text-black rounded">
+                                {stats.notVisitedCount}
+                            </div>
+                            <span>Not Visited</span>
                         </div>
+
+                        {/* Not Answered (Triangle) */}
                         <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 bg-red-600 inline-block rounded" />
-                            <span>Not Answered ({stats.notAnsweredCount})</span>
+                            <div className="w-0 h-0 border-l-[20px] border-r-[20px] border-b-[35px] border-l-transparent border-r-transparent border-b-orange-600 relative">
+                                <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-white text-sm font-bold">
+                                    {stats.notAnsweredCount}
+                                </span>
+                            </div>
+                            <span>Not Answered</span>
                         </div>
+
+                        {/* Answered (Square green) */}
                         <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 bg-green-600 inline-block rounded" />
-                            <span>Answered ({stats.answeredCount})</span>
+                            <div className="w-10 h-10 flex items-center justify-center bg-green-600 text-white rounded">
+                                {stats.answeredCount}
+                            </div>
+                            <span>Answered</span>
                         </div>
+
+                        {/* Marked for Review (Circle purple) */}
                         <div className="flex items-center gap-2">
-                            <span className="w-4 h-4 bg-purple-600 inline-block rounded" />
-                            <span>Marked for Review ({stats.markedCount})</span>
+                            <div className="w-10 h-10 flex items-center justify-center bg-purple-600 text-white rounded-full">
+                                {stats.markedCount}
+                            </div>
+                            <span>Marked for Review</span>
                         </div>
-                        <div className="flex items-center gap-2 col-span-2">
-                            <span className="w-4 h-4 bg-gradient-to-br from-green-600 to-purple-700 inline-block rounded" />
-                            <span>Answered & Marked (considered)</span>
+
+                        {/* Answered & Marked for Review (Circle + tick icon / mini square) */}
+                        <div className="flex items-center gap-2">
+                            <div className="relative w-10 h-10 flex items-center justify-center bg-gradient-to-br from-green-600 to-purple-700 text-white rounded-full">
+                                {stats.answeredAndMarkedCount}
+                                {/* Mini box at corner */}
+                                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border rounded-sm"></div>
+                            </div>
+                            <span>Answered & Marked for Review</span>
                         </div>
                     </div>
-
+                    <hr />
                     {/* Palette grid */}
-                    <div className="p-3 overflow-y-auto">
+                    <div className="p-3 overflow-y-auto mt-[10px]">
                         <div className="grid grid-cols-6 gap-2">
                             {quiz.questions.map((_, i) => (
                                 <button
