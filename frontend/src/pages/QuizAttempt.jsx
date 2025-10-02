@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-
 import toast from "react-hot-toast";
 import {
     FiChevronsLeft,
@@ -8,6 +7,7 @@ import {
     FiGrid,
     FiX,
 } from "react-icons/fi";
+import { MdOutlineZoomOutMap, MdZoomInMap } from "react-icons/md";
 import {
     UNSAFE_NavigationContext,
     useNavigate,
@@ -70,6 +70,8 @@ const QuizAttempt = () => {
     const drawerButtonRef = useRef(null);
     const drawerPanelRef = useRef(null);
 
+    const [isAutoSubmitting, setIsAutoSubmitting] = useState(false);
+
     // Fetch quiz
     useEffect(() => {
         fetchQuiz();
@@ -120,7 +122,6 @@ const QuizAttempt = () => {
         }
     };
 
-    // Global timer
     // Global timer fix (doesn't pause on tab change)
     useEffect(() => {
         if (timeLeft === null) return;
@@ -142,7 +143,7 @@ const QuizAttempt = () => {
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [quiz, id]);
+    }, [timeLeft, quiz, id]);
 
     // Accessibility: close drawer with Escape, focus handling
     useEffect(() => {
@@ -177,6 +178,9 @@ const QuizAttempt = () => {
     }, []);
 
     useBlocker(() => {
+        if (isAutoSubmitting) {
+            return true; // allow navigation if auto-submitting
+        }
         const confirmLeave = window.confirm(
             "Are you sure? Leaving will submit your quiz."
         );
@@ -259,6 +263,7 @@ const QuizAttempt = () => {
     };
 
     const handleSubmitAuto = () => {
+        setIsAutoSubmitting(true); // disable blockers
         toast("Time’s up! Auto submitting...");
         handleSubmit();
     };
@@ -278,6 +283,7 @@ const QuizAttempt = () => {
             navigate(`/attempt-result/${res.attempt._id}`);
         } catch (err) {
             toast.error("Submit failed!");
+            setIsAutoSubmitting(false); // re-enable blocker if failed
         }
     };
 
@@ -386,27 +392,33 @@ const QuizAttempt = () => {
                         </span>
                     </div>
 
-                    <span
-                        className={`font-bold tabular-nums ${
-                            timeLeft < 300 ? "text-red-600" : ""
-                        }`}
-                        aria-live="polite"
-                    >
-                        <FiClock className="inline mr-1 align-[-2px]" />
-                        {formatTime(timeLeft)}
-                    </span>
-                    <button
-                        onClick={() => {
-                            if (!document.fullscreenElement) {
-                                document.documentElement.requestFullscreen();
-                            } else {
-                                document.exitFullscreen();
-                            }
-                        }}
-                        className="px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200"
-                    >
-                        Fullscreen
-                    </button>
+                    <div className="flex justify-center items-center gap-[15px]">
+                        <span
+                            className={`font-bold tabular-nums ${
+                                timeLeft < 300 ? "text-red-600" : ""
+                            }`}
+                            aria-live="polite"
+                        >
+                            <FiClock className="inline mr-1 align-[-2px]" />
+                            {formatTime(timeLeft)}
+                        </span>
+                        <button
+                            onClick={() => {
+                                if (!document.fullscreenElement) {
+                                    document.documentElement.requestFullscreen();
+                                } else {
+                                    document.exitFullscreen();
+                                }
+                            }}
+                            className="px-3 py-1 border rounded bg-gray-100 hover:bg-gray-200"
+                        >
+                            {!document.fullscreenElement ? (
+                                <MdOutlineZoomOutMap className="h-7 w-7 bg-white" />
+                            ) : (
+                                <MdZoomInMap className="h-7 w-7 bg-white" />
+                            )}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Question content scroll area */}
