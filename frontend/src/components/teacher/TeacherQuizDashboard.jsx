@@ -28,7 +28,14 @@ export default function TeacherQuizDashboard() {
         if (quizId) fetchAttempts();
     }, [quizId]);
 
-    if (loading) return <p className="text-center mt-10">Loading...</p>;
+    if (loading) return;
+
+    <>
+        <p className="text-center mt-10">Loading...</p>
+        <div className="flex items-center justify-center min-h-[400px]">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+        </div>
+    </>;
 
     if (attempts.length === 0)
         return (
